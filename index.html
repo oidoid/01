@@ -49,7 +49,7 @@
       gl.linkProgram(pgm)
       gl.useProgram(pgm)
 
-      let width, height = 128
+      let width, height = 64
       let resize = () => {
         width = Math.trunc(height * window.innerWidth / window.innerHeight)
 
@@ -61,7 +61,6 @@
       }
       resize()
       window.addEventListener('resize', resize)
-
 
       let buffer = gl.createBuffer()
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
@@ -75,14 +74,19 @@
         gl.drawArrays(gl.POINTS, 0, 1)
       }
 
-      let x = 0
+      let x = 0, timestamp = Date.now()
       let render = () => {
+        let now = Date.now()
+        let step = 60 * (now - timestamp) / 1000
+        timestamp = now
+
         gl.clearColor(.956862745, .956862745, .929411765, 1)
         gl.clear(gl.COLOR_BUFFER_BIT)
 
         for (let i = 0; i < height; ++i) px(x % width, i)
 
-        ++x
+        x += step * 1
+
         window.requestAnimationFrame(render)
       }
       render()
