@@ -3,11 +3,26 @@
     <meta name=viewport content='width=device-width, initial-scale=1' />
     <title>01</title>
     <style>
-      body {margin: 0; background: #000; overflow: hidden;}
+      body {
+        background: #000;
+
+        /* Make the body flush with the window. */
+        margin: 0;
+
+        /* Clip the body to the window and suppress scrollbars. The canvas is
+           scaled to the greatest *integer* multiple required to fill both width
+           and height. The window is exceeded on one or both sides when it's not
+           a square integer multiple. An integer is used to maintained pixel
+           proportions. */
+        overflow: hidden;
+      }
       canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
+        /* Center the clipped canvas which often overflows the window. */
+        margin-left: 50%;
+        transform: translateX(-50%);
+
+        /* Scale using nearest-neighbor and proportional integer multiples to
+           keep rendering pixel perfect. */
         image-rendering: optimizeSpeed;
         image-rendering: pixelated;
       }
@@ -15,81 +30,341 @@
   </head>
   <body>
     <canvas></canvas>
-    <script type=x-shader/x-vertex id=vert>
-      uniform vec2 resolution;
-      attribute vec2 vert;
+
+    <script id=vert type=x-shader>
+      #version 300 es
+      precision lowp float;
+      precision lowp int;
+
+      // Should match JavaScript RESOLUTION. The rendering resolution is fixed
+      // although the canvas dimensions and CSS scale may change.
+      const vec2 RESOLUTION = vec2(64, 64); // x, y (px)
+
+      // Must match JavaScript ATTRIB_LOCATION.
+      layout(location = 0) in vec2 texCoord; // x, y (px)
+      layout(location = 1) in vec4 subTexCoord; // x, y, w, h (px)
+      layout(location = 2) in vec2 scale; // x, y
+      // 0-255 (an integer is used for simple buffering).
+      layout(location = 3) in float minusAlpha;
+      layout(location = 4) in vec2 position; // x, y (px)
+
+      out vec2 vTexCoord; // x, y (px)
+      out float vMinusAlpha; // 0-1
+
       void main() {
-        vec2 clip = (2. * (vert + vec2(.5, .5)) / resolution - 1.) * vec2(1, -1);
+        // Values are in pixel units. Compute the pixel position of the scaled
+        // subtexture.
+        vec2 px = texCoord * subTexCoord.zw * scale + position;
+
+        // Convert the pixels to clip space by taking them to be fraction of the
+        // total resolution, translating them to -1 to 1, and flipping the y
+        // -coordinate so positive y is downward.
+        vec2 clip = (2. * px / RESOLUTION - 1.) * vec2(1, -1);
         gl_Position = vec4(clip, 0, 1);
+
+        // Output the computed sub-texture coordinate and -alpha.
+        vTexCoord = subTexCoord.xy + texCoord * subTexCoord.zw;
+        vMinusAlpha = minusAlpha / 255.;
       }
     </script>
-    <script type=x-shader/x-fragment id=frag>
-      precision mediump float;
-      uniform vec4 color;
-      void main() { gl_FragColor = color; }
+
+    <script id=frag type=x-shader>
+      #version 300 es
+      precision lowp float;
+      precision lowp int;
+      precision lowp sampler2D;
+
+      uniform sampler2D uSampler;
+      uniform vec2 uAtlasSize; // x, y (px)
+
+      in vec2 vTexCoord;
+      in float vMinusAlpha;
+
+      out vec4 frag;
+
+      void main() {
+        vec4 color = texture(uSampler, vTexCoord / uAtlasSize);
+        frag = vec4(color.rgb, color.a - vMinusAlpha);
+      }
     </script>
+
     <script>
-      let gl = window.document.querySelector('canvas').getContext('webgl', {
+      const RESOLUTION = 64 // px
+      const BYTE = WebGLRenderingContext.BYTE
+      const UNSIGNED_BYTE = WebGLRenderingContext.UNSIGNED_BYTE
+      const BYTE_SIZE = Int8Array.BYTES_PER_ELEMENT
+      const UNSIGNED_BYTE_SIZE = Uint8Array.BYTES_PER_ELEMENT
+      const ATTRIB_LAYOUT = { // Must match shader and buffer layouts.
+        vert: {
+          stride: 2,
+          texCoord: {
+            location: 0,
+            type: BYTE,
+            size: BYTE_SIZE,
+            length: 2,
+            stride: 2,
+            offset: 0,
+            divisor: 0
+          }
+        },
+        instance: {
+          stride: 9,
+          subTexCoord: {
+            location: 1,
+            type: BYTE,
+            size: BYTE_SIZE,
+            length: 4,
+            stride: 9,
+            offset: 0,
+            divisor: 1
+          },
+          scale: {
+            location: 2,
+            type: BYTE,
+            size: BYTE_SIZE,
+            length: 2,
+            stride: 9,
+            offset: 4,
+            divisor: 1
+          },
+          minusAlpha: {
+            location: 3,
+            type: UNSIGNED_BYTE,
+            size: UNSIGNED_BYTE_SIZE,
+            length: 1,
+            stride: 9,
+            offset: 6,
+            divisor: 1
+          },
+          position: {
+            location: 4,
+            type: BYTE,
+            size: BYTE_SIZE,
+            length: 2,
+            stride: 9,
+            offset: 7,
+            divisor: 1
+          }
+        }
+      }
+      const DIMENSIONS = 2 // "2D"
+      const TILE_LENGTH = 3 // width / height (px)
+      const ATLAS_PNG_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAADCAMAAAB21NVEAAAACVBMVEUAAAAA/wAAAABJBy5MAAAAA3RSTlMA//9EUNYhAAAAGElEQVQImWNgZGRkYGRgYmJiYGSCs2BiAAHXACALOlztAAAAAElFTkSuQmCC'
+      const SUB_TEX_COORD = { // px
+        zero: {x: 0, y: 0},
+        one: {x: 3, y: 0},
+        // A full-screen black translucent texture used to gradually clear the
+        // screen in several passes.
+        clear: {x: 6, y: 0}
+      }
+      const INSTANCE_TYPE = {zero: 'zero', one: 'one', clear: 'clear'}
+      const SPAWN = {
+        min: {
+          minusAlpha: 0x00, // 0-255
+          x: -TILE_LENGTH, // px
+          y: -RESOLUTION, // px
+          velocity: 4, // px / s
+        },
+        max: {
+          minusAlpha: 255 - 1, // 0-255
+          x: RESOLUTION + 2 * TILE_LENGTH, // px
+          y: 0, // px
+          velocity: 16 // px / s
+        },
+        total: 256 // instances of 0s and 1s (+ 1 instance for clearing).
+      }
+      const CLEAR_MINUS_ALPHA = 255 - 8 // 0-255
+
+      const canvas = window.document.querySelector('canvas')
+      const gl = canvas.getContext('webgl2', {
         alpha: false,
-        antialias: false,
         depth: false,
-        stencil: false,
-        preserveDrawingBuffer: false
+        antialias: false,
+        preferLowPowerToHighPerformance: true,
+
+        // Don't clear the screen. A full-screen black translucent texture is
+        // drawn each render.
+        preserveDrawingBuffer: true
       })
 
-      let pgm = gl.createProgram()
-      let loadShader = (type, id) => {
-        let shader = gl.createShader(type)
-        gl.shaderSource(shader, document.getElementById(id).textContent)
-        gl.compileShader(shader)
-        gl.attachShader(pgm, shader)
-      }
-      loadShader(gl.VERTEX_SHADER, 'vert')
-      loadShader(gl.FRAGMENT_SHADER, 'frag')
-      gl.linkProgram(pgm)
-      gl.useProgram(pgm)
+      canvas.width = RESOLUTION
+      canvas.height = RESOLUTION
+      gl.viewport(0, 0, RESOLUTION, RESOLUTION)
 
-      let width, height = 64
-      let resize = () => {
-        width = Math.trunc(height * window.innerWidth / window.innerHeight)
-
-        gl.canvas.width = width
-        gl.canvas.height = height
-
-        gl.uniform2f(gl.getUniformLocation(pgm, 'resolution'), width, height)
-        gl.viewport(0, 0, width, height)
+      function resize() {
+        // The integer scale that will ensure the product of resolution in
+        // either dimension meets or exceeds the corresponding window
+        // dimension's length. An integer multiple is used to keep pixel perfect
+        // rendering.
+        const scale = Math.ceil(Math.max(window.innerWidth, window.innerHeight) / RESOLUTION)
+        canvas.style.width = `${scale * RESOLUTION}px`
+        canvas.style.height = `${scale * RESOLUTION}px`
       }
       resize()
-      window.addEventListener('resize', resize)
+      addEventListener('resize', resize)
 
-      let buffer = gl.createBuffer()
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-      let vert = gl.getAttribLocation(pgm, 'vert')
-      gl.enableVertexAttribArray(vert)
-      gl.vertexAttribPointer(vert, 2, gl.FLOAT, false, 0, 0)
-      gl.uniform4f(gl.getUniformLocation(pgm, 'color'), 0, 0, 0, 1)
+      gl.enable(gl.BLEND)
+      gl.blendEquation(gl.FUNC_ADD)
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-      let px = (x, y) => {
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([x, y]), gl.STATIC_DRAW)
-        gl.drawArrays(gl.POINTS, 0, 1)
+      function loadShader(type, id) {
+        const shader = gl.createShader(type)
+        const src = document.querySelector(`#${id}`).textContent.trim()
+        gl.shaderSource(shader, src)
+        gl.compileShader(shader)
+        const log = gl.getShaderInfoLog(shader)
+        if (log) console.error(log)
+        gl.attachShader(program, shader)
+        return shader
+      }
+      const program = gl.createProgram()
+      const vertShader = loadShader(gl.VERTEX_SHADER, 'vert')
+      const fragShader = loadShader(gl.FRAGMENT_SHADER, 'frag')
+      gl.linkProgram(program)
+      gl.useProgram(program)
+
+      gl.detachShader(program, fragShader)
+      gl.detachShader(program, vertShader)
+      gl.deleteShader(fragShader)
+      gl.deleteShader(vertShader)
+
+      function rnd(min, max) { return min + Math.random() * (max - min) }
+      function spawn() {
+        return {
+          type: Math.floor(rnd(0, 1 + 1)) === 0 // 0 or 1
+            ? INSTANCE_TYPE.zero
+            : INSTANCE_TYPE.one,
+          scale: {x: 1, y: 1},
+          minusAlpha: rnd(SPAWN.min.minusAlpha, SPAWN.max.minusAlpha),
+          x: rnd(SPAWN.min.x, SPAWN.max.x), // px
+          y: rnd(SPAWN.min.y, SPAWN.max.y), // px
+          velocity: rnd(SPAWN.min.velocity, SPAWN.max.velocity) // px / s
+        }
+      }
+      const instances = Array.from(Array(SPAWN.total)).map(spawn)
+
+      // Clear the background in the first render pass by adding the clear type
+      // to the front of the instances.
+      instances.unshift({
+        x: 0,
+        y: 0,
+        scale: {
+          x: Math.ceil(RESOLUTION / TILE_LENGTH),
+          y: Math.ceil(RESOLUTION / TILE_LENGTH)
+        },
+        minusAlpha: CLEAR_MINUS_ALPHA,
+        velocity: 0,
+        type: INSTANCE_TYPE.clear
+      })
+
+      function updateInstanceData(data, instance, i) {
+        const offset = i * ATTRIB_LAYOUT.instance.stride
+        data[offset + 0] = SUB_TEX_COORD[instance.type].x
+        data[offset + 1] = SUB_TEX_COORD[instance.type].y
+        data[offset + 2] = TILE_LENGTH
+        data[offset + 3] = TILE_LENGTH
+        data[offset + 4] = instance.scale.x
+        data[offset + 5] = instance.scale.y
+        data[offset + 6] = instance.minusAlpha
+        data[offset + 7] = instance.x
+        data[offset + 8] = instance.y
+        return data
       }
 
-      let x = 0, timestamp = Date.now()
-      let render = () => {
-        let now = Date.now()
-        let step = 60 * (now - timestamp) / 1000
-        timestamp = now
-
-        gl.clearColor(.956862745, .956862745, .929411765, 1)
-        gl.clear(gl.COLOR_BUFFER_BIT)
-
-        for (let i = 0; i < height; ++i) px(x % width, i)
-
-        x += step * 1
-
-        window.requestAnimationFrame(render)
+      const data = {
+        vert: new Int8Array([ // Only texCoords are per vertex.
+          1, 1,
+          0, 1,
+          1, 0,
+          0, 0
+        ]),
+        instance: instances.reduce(
+          updateInstanceData,
+          new Int8Array(instances.length * ATTRIB_LAYOUT.instance.stride)
+        )
       }
-      render()
+
+      function buffer(buffer, data) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW)
+        gl.bindBuffer(gl.ARRAY_BUFFER, null)
+      }
+      const texCoordBuffer = gl.createBuffer()
+      buffer(texCoordBuffer, data.vert)
+      const subTexCoordBuffer = gl.createBuffer()
+
+      function initVertexAttrib(layout, buffer) {
+        gl.enableVertexAttribArray(layout.location)
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+        gl.vertexAttribPointer(
+          layout.location,
+          layout.length,
+          layout.type,
+          false,
+          layout.stride,
+          layout.offset
+        )
+        gl.vertexAttribDivisor(layout.location, layout.divisor)
+        gl.bindBuffer(gl.ARRAY_BUFFER, null)
+      }
+      const vertexArray = gl.createVertexArray()
+      gl.bindVertexArray(vertexArray)
+      initVertexAttrib(ATTRIB_LAYOUT.vert.texCoord, texCoordBuffer)
+      initVertexAttrib(ATTRIB_LAYOUT.instance.subTexCoord, subTexCoordBuffer)
+      initVertexAttrib(ATTRIB_LAYOUT.instance.scale, subTexCoordBuffer)
+      initVertexAttrib(ATTRIB_LAYOUT.instance.minusAlpha, subTexCoordBuffer)
+      initVertexAttrib(ATTRIB_LAYOUT.instance.position, subTexCoordBuffer)
+      gl.bindVertexArray(null)
+
+      function update(seconds) {
+        instances.forEach((instance, i) => {
+          instance.y += seconds * instance.velocity // y += s * px / s
+          if (instance.y > RESOLUTION) instances[i] = spawn()
+          updateInstanceData(data.instance, instances[i], i)
+        })
+      }
+
+      function render() {
+        gl.bindVertexArray(vertexArray)
+
+        buffer(subTexCoordBuffer, data.instance)
+
+        const length = data.vert.length / DIMENSIONS
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, length, instances.length)
+
+        gl.bindVertexArray(null)
+      }
+
+      function loop(then, now) {
+        // A fraction / multiple of a second.
+        const seconds = (now - then) / 1000
+
+        then = now
+        requestAnimationFrame(now => loop(then, now))
+
+        update(seconds)
+        render()
+      }
+
+      const atlas = new Image()
+      atlas.onload = () => {
+        gl.activeTexture(gl.TEXTURE0)
+        const texture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        gl.texImage2D(
+          gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas
+        )
+
+        const uSampler = gl.getUniformLocation(program, 'uSampler')
+        const uAtlasSize = gl.getUniformLocation(program, 'uAtlasSize')
+        gl.uniform1i(uSampler, 0)
+        gl.uniform2f(uAtlasSize, atlas.naturalWidth, atlas.naturalHeight)
+
+        requestAnimationFrame(now => loop(now, now))
+      }
+      atlas.src = ATLAS_PNG_URI
     </script>
   </body>
 </html>
