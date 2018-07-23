@@ -3,6 +3,8 @@
 
 ![](01.gif)
 
+[Click here for demo](https://htmlpreview.github.io/?https://github.com/niedzielski/01/blob/master/index.html)
+
 ## License (GPLv3)
 
 © Stephen Niedzielski.
