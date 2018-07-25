@@ -175,15 +175,18 @@
       }
       const CLEAR_MINUS_ALPHA = 255 - 8 // 0-255
 
-      let requestId
-      const atlas = new Image()
+      function loadShader(gl, program, type, id) {
+        const shader = gl.createShader(type)
+        const src = document.querySelector(`#${id}`).textContent.trim()
+        gl.shaderSource(shader, src)
+        gl.compileShader(shader)
+        const log = gl.getShaderInfoLog(shader)
+        if (log) console.error(log)
+        gl.attachShader(program, shader)
+        return shader
+      }
 
-      const canvas = window.document.querySelector('canvas')
-
-      canvas.width = RESOLUTION
-      canvas.height = RESOLUTION
-
-      function resize() {
+      function scaleCanvas(canvas) {
         // The integer scale that will ensure the product of resolution in
         // either dimension meets or exceeds the corresponding window
         // dimension's length. An integer multiple is used to keep pixel perfect
@@ -192,7 +195,185 @@
         canvas.style.width = `${scale * RESOLUTION}px`
         canvas.style.height = `${scale * RESOLUTION}px`
       }
-      addEventListener('resize', resize)
+
+      function onContextRestored(gl, state) {
+        console.log('GL context restored.')
+        scaleCanvas(gl.canvas)
+        const glState = initGL(gl, state)
+        state.requestId = requestAnimationFrame(
+          now => loop(glState, state, now, now)
+        )
+      }
+
+      function onContextLost(canvas, state, event) {
+        console.log('GL context lost.')
+        event.preventDefault()
+        cancelAnimationFrame(state.requestId)
+
+        // This seems to be necessary to prevent the canvas from scaling to a
+        // blurry antialiased mess on context restore.
+        // todo: this is still an issue if the window is resized during pause :-[
+        canvas.style.width = ''
+      }
+
+      function rnd(min, max) { return min + Math.random() * (max - min) }
+      function rndInt(min, max) { return Math.floor(rnd(min, max + 1)) }
+
+      function spawn() {
+        return {
+          type: rndInt(0, 1) ? INSTANCE_TYPE.zero : INSTANCE_TYPE.one,
+          scale: {x: 1, y: 1},
+          minusAlpha: rnd(SPAWN.min.minusAlpha, SPAWN.max.minusAlpha),
+          x: rnd(SPAWN.min.x, SPAWN.max.x), // px
+          y: rnd(SPAWN.min.y, SPAWN.max.y), // px
+          velocity: rnd(SPAWN.min.velocity, SPAWN.max.velocity) // px / s
+        }
+      }
+
+      function updateInstanceData(data, instance, i) {
+        const offset = i * ATTRIB_LAYOUT.instance.stride
+        data[offset + 0] = SUB_TEX_COORD[instance.type].x
+        data[offset + 1] = SUB_TEX_COORD[instance.type].y
+        data[offset + 2] = TILE_LENGTH
+        data[offset + 3] = TILE_LENGTH
+        data[offset + 4] = instance.scale.x
+        data[offset + 5] = instance.scale.y
+        data[offset + 6] = instance.minusAlpha
+        data[offset + 7] = instance.x
+        data[offset + 8] = instance.y
+        return data
+      }
+
+      function glBuffer(gl, buffer, data) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW)
+        gl.bindBuffer(gl.ARRAY_BUFFER, null)
+      }
+
+      function initVertexAttrib(gl, layout, buffer) {
+        gl.enableVertexAttribArray(layout.location)
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+        gl.vertexAttribPointer(
+          layout.location,
+          layout.length,
+          layout.type,
+          false,
+          layout.stride,
+          layout.offset
+        )
+        gl.vertexAttribDivisor(layout.location, layout.divisor)
+        gl.bindBuffer(gl.ARRAY_BUFFER, null)
+      }
+
+      function update(state, seconds) {
+        state.instances.forEach((instance, i) => {
+          instance.y += seconds * instance.velocity // y += s * px / s
+          if (instance.y > RESOLUTION) state.instances[i] = spawn()
+          updateInstanceData(state.attribData.instance, state.instances[i], i)
+        })
+      }
+
+      function render({gl, vertexArray, instanceBuffer}, state) {
+        gl.bindVertexArray(vertexArray)
+
+        glBuffer(gl, instanceBuffer, state.attribData.instance)
+
+        const length = state.attribData.vert.length / DIMENSIONS
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, length, state.instances.length)
+
+        gl.bindVertexArray(null)
+      }
+
+      function loop(glState, state, then, now) {
+        // A fraction / multiple of a second.
+        const seconds = (now - then) / 1000
+
+        then = now
+        state.requestId = requestAnimationFrame(
+          now => loop(glState, state, then, now)
+        )
+
+        update(state, seconds)
+        render(glState, state)
+      }
+
+      function initGL(gl, state) {
+        gl.enable(gl.BLEND)
+        gl.blendEquation(gl.FUNC_ADD)
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+
+        const program = gl.createProgram()
+        const vertShader = loadShader(gl, program, gl.VERTEX_SHADER, 'vert')
+        const fragShader = loadShader(gl, program, gl.FRAGMENT_SHADER, 'frag')
+        gl.linkProgram(program)
+        gl.useProgram(program)
+
+        gl.detachShader(program, fragShader)
+        gl.detachShader(program, vertShader)
+        gl.deleteShader(fragShader)
+        gl.deleteShader(vertShader)
+
+        const uSampler = gl.getUniformLocation(program, 'uSampler')
+        const uAtlasSize = gl.getUniformLocation(program, 'uAtlasSize')
+        gl.uniform1i(uSampler, 0)
+        gl.uniform2f(
+          uAtlasSize, state.atlas.naturalWidth, state.atlas.naturalHeight
+        )
+
+        gl.activeTexture(gl.TEXTURE0)
+        const texture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        gl.texImage2D(
+          gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, state.atlas
+        )
+
+        const vertBuffer = gl.createBuffer()
+        glBuffer(gl, vertBuffer, state.attribData.vert)
+        const instanceBuffer = gl.createBuffer()
+
+        const vertexArray = gl.createVertexArray()
+        gl.bindVertexArray(vertexArray)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.vert.texCoord, vertBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.subTexCoord, instanceBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.scale, instanceBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.minusAlpha, instanceBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.position, instanceBuffer)
+        gl.bindVertexArray(null)
+
+        return {gl, program, vertexArray, vertBuffer, instanceBuffer}
+      }
+
+      function onAtlasLoaded(gl, state) {
+        const glState = initGL(gl, state)
+
+        gl.canvas.addEventListener(
+          'webglcontextlost', event => onContextLost(canvas, state, event)
+        )
+        gl.canvas.addEventListener(
+          'webglcontextrestored', () => onContextRestored(gl, state)
+        )
+
+        const extension = gl.getExtension('WEBGL_lose_context')
+        if (extension) {
+          addEventListener('keyup', event => {
+            if (event.key !== 'p') return
+            if (gl.isContextLost()) extension.restoreContext()
+            else extension.loseContext()
+          })
+        }
+
+        state.requestId = requestAnimationFrame(
+          now => loop(glState, state, now, now)
+        )
+      }
+
+      const canvas = window.document.querySelector('canvas')
+      canvas.width = RESOLUTION
+      canvas.height = RESOLUTION
+      scaleCanvas(canvas)
+      addEventListener('resize', () => scaleCanvas(canvas))
 
       const gl = canvas.getContext('webgl2', {
         alpha: false,
@@ -204,199 +385,41 @@
         // drawn each render.
         preserveDrawingBuffer: true
       })
+      gl.viewport(0, 0, RESOLUTION, RESOLUTION)
 
-      canvas.addEventListener('webglcontextlost', event => {
-        console.log('GL context lost.')
-        event.preventDefault()
-        atlas.src = ''
-        cancelAnimationFrame(requestId)
+      const state = {requestId: undefined}
+      state.instances = Array.from(Array(SPAWN.total)).map(spawn)
 
-        // This seems to be necessary to prevent the canvas from scaling to a
-        // blurry antialiased mess on context restore.
-        canvas.style.width = ''
+      // Clear the background in the first render pass by adding the clear type
+      // to the front of the instances.
+      state.instances.unshift({
+        x: 0,
+        y: 0,
+        scale: {
+          x: Math.ceil(RESOLUTION / TILE_LENGTH),
+          y: Math.ceil(RESOLUTION / TILE_LENGTH)
+        },
+        minusAlpha: CLEAR_MINUS_ALPHA,
+        velocity: 0,
+        type: INSTANCE_TYPE.clear
       })
-      canvas.addEventListener('webglcontextrestored', event => {
-        console.log('GL context restored.')
-        init()
-      })
 
-      const extension = gl.getExtension('WEBGL_lose_context')
-      if (extension) {
-        addEventListener('keyup', event => {
-          if (event.key !== 'p') return
-          if (gl.isContextLost()) extension.restoreContext()
-          else extension.loseContext()
-        })
+      state.attribData = {
+        vert: new Int8Array([ // Only texCoords are per vertex.
+          1, 1,
+          0, 1,
+          1, 0,
+          0, 0
+        ]),
+        instance: state.instances.reduce(
+          updateInstanceData,
+          new Int8Array(state.instances.length * ATTRIB_LAYOUT.instance.stride)
+        )
       }
 
-      function init() {
-        gl.viewport(0, 0, RESOLUTION, RESOLUTION)
-
-        resize()
-
-        gl.enable(gl.BLEND)
-        gl.blendEquation(gl.FUNC_ADD)
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-
-        function loadShader(type, id) {
-          const shader = gl.createShader(type)
-          const src = document.querySelector(`#${id}`).textContent.trim()
-          gl.shaderSource(shader, src)
-          gl.compileShader(shader)
-          const log = gl.getShaderInfoLog(shader)
-          if (log) console.error(log)
-          gl.attachShader(program, shader)
-          return shader
-        }
-        const program = gl.createProgram()
-        const vertShader = loadShader(gl.VERTEX_SHADER, 'vert')
-        const fragShader = loadShader(gl.FRAGMENT_SHADER, 'frag')
-        gl.linkProgram(program)
-        gl.useProgram(program)
-
-        gl.detachShader(program, fragShader)
-        gl.detachShader(program, vertShader)
-        gl.deleteShader(fragShader)
-        gl.deleteShader(vertShader)
-
-        function rnd(min, max) { return min + Math.random() * (max - min) }
-        function spawn() {
-          return {
-            type: Math.floor(rnd(0, 1 + 1)) === 0 // 0 or 1
-              ? INSTANCE_TYPE.zero
-              : INSTANCE_TYPE.one,
-            scale: {x: 1, y: 1},
-            minusAlpha: rnd(SPAWN.min.minusAlpha, SPAWN.max.minusAlpha),
-            x: rnd(SPAWN.min.x, SPAWN.max.x), // px
-            y: rnd(SPAWN.min.y, SPAWN.max.y), // px
-            velocity: rnd(SPAWN.min.velocity, SPAWN.max.velocity) // px / s
-          }
-        }
-        const instances = Array.from(Array(SPAWN.total)).map(spawn)
-
-        // Clear the background in the first render pass by adding the clear type
-        // to the front of the instances.
-        instances.unshift({
-          x: 0,
-          y: 0,
-          scale: {
-            x: Math.ceil(RESOLUTION / TILE_LENGTH),
-            y: Math.ceil(RESOLUTION / TILE_LENGTH)
-          },
-          minusAlpha: CLEAR_MINUS_ALPHA,
-          velocity: 0,
-          type: INSTANCE_TYPE.clear
-        })
-
-        function updateInstanceData(data, instance, i) {
-          const offset = i * ATTRIB_LAYOUT.instance.stride
-          data[offset + 0] = SUB_TEX_COORD[instance.type].x
-          data[offset + 1] = SUB_TEX_COORD[instance.type].y
-          data[offset + 2] = TILE_LENGTH
-          data[offset + 3] = TILE_LENGTH
-          data[offset + 4] = instance.scale.x
-          data[offset + 5] = instance.scale.y
-          data[offset + 6] = instance.minusAlpha
-          data[offset + 7] = instance.x
-          data[offset + 8] = instance.y
-          return data
-        }
-
-        const data = {
-          vert: new Int8Array([ // Only texCoords are per vertex.
-            1, 1,
-            0, 1,
-            1, 0,
-            0, 0
-          ]),
-          instance: instances.reduce(
-            updateInstanceData,
-            new Int8Array(instances.length * ATTRIB_LAYOUT.instance.stride)
-          )
-        }
-
-        function buffer(buffer, data) {
-          gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-          gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW)
-          gl.bindBuffer(gl.ARRAY_BUFFER, null)
-        }
-        const texCoordBuffer = gl.createBuffer()
-        buffer(texCoordBuffer, data.vert)
-        const subTexCoordBuffer = gl.createBuffer()
-
-        function initVertexAttrib(layout, buffer) {
-          gl.enableVertexAttribArray(layout.location)
-          gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-          gl.vertexAttribPointer(
-            layout.location,
-            layout.length,
-            layout.type,
-            false,
-            layout.stride,
-            layout.offset
-          )
-          gl.vertexAttribDivisor(layout.location, layout.divisor)
-          gl.bindBuffer(gl.ARRAY_BUFFER, null)
-        }
-        const vertexArray = gl.createVertexArray()
-        gl.bindVertexArray(vertexArray)
-        initVertexAttrib(ATTRIB_LAYOUT.vert.texCoord, texCoordBuffer)
-        initVertexAttrib(ATTRIB_LAYOUT.instance.subTexCoord, subTexCoordBuffer)
-        initVertexAttrib(ATTRIB_LAYOUT.instance.scale, subTexCoordBuffer)
-        initVertexAttrib(ATTRIB_LAYOUT.instance.minusAlpha, subTexCoordBuffer)
-        initVertexAttrib(ATTRIB_LAYOUT.instance.position, subTexCoordBuffer)
-        gl.bindVertexArray(null)
-
-        function update(seconds) {
-          instances.forEach((instance, i) => {
-            instance.y += seconds * instance.velocity // y += s * px / s
-            if (instance.y > RESOLUTION) instances[i] = spawn()
-            updateInstanceData(data.instance, instances[i], i)
-          })
-        }
-
-        function render() {
-          gl.bindVertexArray(vertexArray)
-
-          buffer(subTexCoordBuffer, data.instance)
-
-          const length = data.vert.length / DIMENSIONS
-          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, length, instances.length)
-
-          gl.bindVertexArray(null)
-        }
-
-        function loop(then, now) {
-          // A fraction / multiple of a second.
-          const seconds = (now - then) / 1000
-
-          then = now
-          requestId = requestAnimationFrame(now => loop(then, now))
-
-          update(seconds)
-          render()
-        }
-
-        atlas.onload = () => {
-          gl.activeTexture(gl.TEXTURE0)
-          const texture = gl.createTexture()
-          gl.bindTexture(gl.TEXTURE_2D, texture)
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-          gl.texImage2D(
-            gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas
-          )
-
-          const uSampler = gl.getUniformLocation(program, 'uSampler')
-          const uAtlasSize = gl.getUniformLocation(program, 'uAtlasSize')
-          gl.uniform1i(uSampler, 0)
-          gl.uniform2f(uAtlasSize, atlas.naturalWidth, atlas.naturalHeight)
-
-          requestId = requestAnimationFrame(now => loop(now, now))
-        }
-        atlas.src = ATLAS_PNG_URI
-      }
-      init()
+      state.atlas = new Image()
+      state.atlas.onload = () => onAtlasLoaded(gl, state)
+      state.atlas.src = ATLAS_PNG_URI
     </script>
   </body>
 </html>
