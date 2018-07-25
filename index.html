@@ -385,6 +385,7 @@
         // drawn each render.
         preserveDrawingBuffer: true
       })
+      if (!gl) alert('WebGL 2 is unsupported by this browser :-[')
       gl.viewport(0, 0, RESOLUTION, RESOLUTION)
 
       const state = {requestId: undefined}
@@ -418,6 +419,7 @@
       }
 
       state.atlas = new Image()
+      state.atlas.onerror = () => { throw new Error('Failed to load atlas.') }
       state.atlas.onload = () => onAtlasLoaded(gl, state)
       state.atlas.src = ATLAS_PNG_URI
     </script>
