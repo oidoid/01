@@ -11,6 +11,11 @@
         /* Make the body flush with the window. */
         margin: 0;
       }
+      canvas {
+        /* When the user scales, use nearest-neighbor to prevent blurriness. */
+        image-rendering: optimizeSpeed;
+        image-rendering: pixelated;
+      }
     </style>
   </head>
   <body>
@@ -248,8 +253,8 @@
 
       function render({gl, program, vertexArray, instanceBuffer}, state) {
         // Shader pixels are 1:1 with the canvas. No canvas CSS scaling.
-        const w = window.innerWidth * window.devicePixelRatio
-        const h = window.innerHeight * window.devicePixelRatio
+        const w = window.innerWidth
+        const h = window.innerHeight
         gl.canvas.width = w
         gl.canvas.height = h
 
@@ -369,7 +374,7 @@
       // Clear the background in the first render pass by adding the clear type
       // to the front of the instances.
       state.instances.unshift({
-        x: 0,
+        x: -1,
         y: 0,
         scale: {
           x: Math.ceil(RESOLUTION / TILE_LENGTH),
