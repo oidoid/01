@@ -31,8 +31,8 @@
       const vec2 RESOLUTION = vec2(64, 64); // x, y (px)
 
       // Must match JavaScript ATTRIB_LOCATION.
-      layout(location = 0) in vec2 texCoord; // x, y (px)
-      layout(location = 1) in vec4 subTexCoord; // x, y, w, h (px)
+      layout(location = 0) in vec2 uv; // x, y (0-1)
+      layout(location = 1) in vec4 texCoord; // x, y, w, h (px)
       layout(location = 2) in vec2 scale; // x, y
       // 0-255 (an integer is used for simple buffering).
       layout(location = 3) in float minusAlpha;
@@ -44,7 +44,7 @@
       void main() {
         // Values are in pixel units. Compute the pixel position of the scaled
         // subtexture.
-        vec2 px = texCoord * subTexCoord.zw * scale + position;
+        vec2 px = uv * texCoord.zw * scale + position;
 
         // Convert the pixels to clip space by taking them to be fraction of the
         // total resolution, translating them to -1 to 1, and flipping the y
@@ -53,7 +53,7 @@
         gl_Position = vec4(clip, 0, 1);
 
         // Output the computed sub-texture coordinate and -alpha.
-        vTexCoord = subTexCoord.xy + texCoord * subTexCoord.zw;
+        vTexCoord = texCoord.xy + uv * texCoord.zw;
         vMinusAlpha = minusAlpha / 255.;
       }
     </script>
@@ -87,7 +87,7 @@
       const ATTRIB_LAYOUT = { // Must match shader and buffer layouts.
         vert: {
           stride: 2,
-          texCoord: {
+          uv: {
             location: 0,
             type: BYTE,
             size: BYTE_SIZE,
@@ -99,7 +99,7 @@
         },
         instance: {
           stride: 9,
-          subTexCoord: {
+          texCoord: {
             location: 1,
             type: BYTE,
             size: BYTE_SIZE,
@@ -140,7 +140,7 @@
       const DIMENSIONS = 2 // "2D"
       const TILE_LENGTH = 3 // width / height (px)
       const ATLAS_PNG_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAADCAMAAAB21NVEAAAACVBMVEUAAAAA/wAAAABJBy5MAAAAA3RSTlMA//9EUNYhAAAAGElEQVQImWNgZGRkYGRgYmJiYGSCs2BiAAHXACALOlztAAAAAElFTkSuQmCC'
-      const SUB_TEX_COORD = { // px
+      const TEX_COORD = { // px
         zero: {x: 0, y: 0},
         one: {x: 3, y: 0},
         // A full-screen black translucent texture used to gradually clear the
@@ -210,8 +210,8 @@
 
       function updateInstanceData(data, instance, i) {
         const offset = i * ATTRIB_LAYOUT.instance.stride
-        data[offset + 0] = SUB_TEX_COORD[instance.type].x
-        data[offset + 1] = SUB_TEX_COORD[instance.type].y
+        data[offset + 0] = TEX_COORD[instance.type].x
+        data[offset + 1] = TEX_COORD[instance.type].y
         data[offset + 2] = TILE_LENGTH
         data[offset + 3] = TILE_LENGTH
         data[offset + 4] = instance.scale.x
@@ -325,8 +325,8 @@
 
         const vertexArray = gl.createVertexArray()
         gl.bindVertexArray(vertexArray)
-        initVertexAttrib(gl, ATTRIB_LAYOUT.vert.texCoord, vertBuffer)
-        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.subTexCoord, instanceBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.vert.uv, vertBuffer)
+        initVertexAttrib(gl, ATTRIB_LAYOUT.instance.texCoord, instanceBuffer)
         initVertexAttrib(gl, ATTRIB_LAYOUT.instance.scale, instanceBuffer)
         initVertexAttrib(gl, ATTRIB_LAYOUT.instance.minusAlpha, instanceBuffer)
         initVertexAttrib(gl, ATTRIB_LAYOUT.instance.position, instanceBuffer)
@@ -386,7 +386,7 @@
       })
 
       state.attribData = {
-        vert: new Int8Array([ // Only texCoords are per vertex.
+        vert: new Int8Array([ // Only UVs are per vertex.
           1, 1,
           0, 1,
           1, 0,
