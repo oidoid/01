@@ -64,8 +64,8 @@
       precision lowp int;
       precision lowp sampler2D;
 
-      uniform sampler2D uSampler;
-      uniform vec2 uAtlasSize; // x, y (px)
+      uniform sampler2D sampler;
+      uniform vec2 atlasSize; // x, y (px)
 
       in vec2 vTexCoord;
       in float vMinusAlpha;
@@ -73,7 +73,7 @@
       out vec4 frag;
 
       void main() {
-        vec4 color = texture(uSampler, vTexCoord / uAtlasSize);
+        vec4 color = texture(sampler, vTexCoord / atlasSize);
         frag = vec4(color.rgb, color.a - vMinusAlpha);
       }
     </script>
@@ -315,11 +315,11 @@
         gl.deleteShader(fragShader)
         gl.deleteShader(vertShader)
 
-        const uSampler = gl.getUniformLocation(program, 'uSampler')
-        const uAtlasSize = gl.getUniformLocation(program, 'uAtlasSize')
-        gl.uniform1i(uSampler, 0)
+        const sampler = gl.getUniformLocation(program, 'sampler')
+        const atlasSize = gl.getUniformLocation(program, 'atlasSize')
+        gl.uniform1i(sampler, 0)
         gl.uniform2f(
-          uAtlasSize, state.atlas.naturalWidth, state.atlas.naturalHeight
+          atlasSize, state.atlas.naturalWidth, state.atlas.naturalHeight
         )
 
         gl.activeTexture(gl.TEXTURE0)
