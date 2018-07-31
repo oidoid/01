@@ -176,22 +176,34 @@
         return shader
       }
 
+      function onPaused(state) {
+        console.log('Paused.')
+        cancelAnimationFrame(state.requestId)
+      }
+
+      function onResumed(state) {
+        console.log('Resumed.')
+        if (!state.gfx.gl.isContextLost()) {
+          startLooping(state)
+        }
+      }
+
       function onContextLost(state, event) {
         console.log('GL context lost.')
         event.preventDefault()
         cancelAnimationFrame(state.requestId)
       }
 
-      function onContextRestored(gl, state) {
+      function onContextRestored(state) {
         console.log('GL context restored.')
-        startLooping()
+        if (!document.hidden) {
+          state.gfx = initGL(state, state.gfx.gl)
+          startLooping(state)
+        }
       }
 
-      function startLooping() {
-        const glState = initGL(gl, state)
-        state.requestId = requestAnimationFrame(
-          now => loop(glState, state, now, now)
-        )
+      function startLooping(state) {
+        state.requestId = requestAnimationFrame(now => loop(state, now, now))
       }
 
       function rnd(min, max) { return min + Math.random() * (max - min) }
@@ -251,7 +263,9 @@
         })
       }
 
-      function render({gl, program, vertexArray, instanceBuffer}, state) {
+      function render(state) {
+        const {gl, program, vertexArray, instanceBuffer} = state.gfx
+
         // Shader pixels are 1:1 with the canvas. No canvas CSS scaling.
         const w = window.innerWidth
         const h = window.innerHeight
@@ -274,20 +288,18 @@
         gl.bindVertexArray(null)
       }
 
-      function loop(glState, state, then, now) {
+      function loop(state, then, now) {
         // A fraction / multiple of a second.
         const seconds = (now - then) / 1000
 
         then = now
-        state.requestId = requestAnimationFrame(
-          now => loop(glState, state, then, now)
-        )
+        state.requestId = requestAnimationFrame(now => loop(state, then, now))
 
         update(state, seconds)
-        render(glState, state)
+        render(state)
       }
 
-      function initGL(gl, state) {
+      function initGL(state, gl) {
         gl.enable(gl.BLEND)
         gl.blendEquation(gl.FUNC_ADD)
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -335,12 +347,18 @@
         return {gl, program, vertexArray, vertBuffer, instanceBuffer}
       }
 
-      function onAtlasLoaded(gl, state) {
+      function onAtlasLoaded(state, gl) {
+        state.gfx = initGL(state, gl)
+
+        addEventListener(
+          'visibilitychange',
+          () => document.hidden ? onPaused(state) : onResumed(state)
+        )
         gl.canvas.addEventListener(
           'webglcontextlost', event => onContextLost(state, event)
         )
         gl.canvas.addEventListener(
-          'webglcontextrestored', () => onContextRestored(gl, state)
+          'webglcontextrestored', () => onContextRestored(state)
         )
 
         const extension = gl.getExtension('WEBGL_lose_context')
@@ -352,7 +370,7 @@
           })
         }
 
-        startLooping()
+        startLooping(state)
       }
 
       const canvas = window.document.querySelector('canvas')
@@ -400,7 +418,7 @@
 
       state.atlas = new Image()
       state.atlas.onerror = () => { throw new Error('Failed to load atlas.') }
-      state.atlas.onload = () => onAtlasLoaded(gl, state)
+      state.atlas.onload = () => onAtlasLoaded(state, gl)
       state.atlas.src = ATLAS_PNG_URI
     </script>
   </body>
