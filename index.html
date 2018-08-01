@@ -1,5 +1,7 @@
-<html>
+<!doctype html>
+<html lang=en>
   <head>
+    <meta charset=utf-8>
     <meta name=viewport content='width=device-width, initial-scale=1' />
     <title>01</title>
     <style>
@@ -196,8 +198,8 @@
 
       function onContextRestored(state) {
         console.log('GL context restored.')
+        state.gfx = initGL(state, state.gfx.gl)
         if (!document.hidden) {
-          state.gfx = initGL(state, state.gfx.gl)
           startLooping(state)
         }
       }
