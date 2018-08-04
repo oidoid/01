@@ -28,7 +28,6 @@
     <canvas></canvas>
 
     <script id=vert type=x-shader>
-      #version 300 es
       precision lowp float;
       precision lowp int;
 
@@ -37,15 +36,15 @@
       const vec2 RESOLUTION = vec2(64, 64); // x, y (px)
 
       // Must match JavaScript ATTRIB_LOCATION.
-      layout(location = 0) in vec2 uv; // x, y (0-1)
-      layout(location = 1) in vec4 texCoord; // x, y, w, h (px)
-      layout(location = 2) in vec2 scale; // x, y
+      attribute vec2 uv; // x, y (0-1)
+      attribute vec4 texCoord; // x, y, w, h (px)
+      attribute vec2 scale; // x, y
       // 0-255 (an integer is used for simple buffering).
-      layout(location = 3) in float minusAlpha;
-      layout(location = 4) in vec2 position; // x, y (px)
+      attribute float minusAlpha;
+      attribute vec2 position; // x, y (px)
 
-      out vec2 vTexCoord; // x, y (px)
-      out float vMinusAlpha; // 0-1
+      varying vec2 vTexCoord; // x, y (px)
+      varying float vMinusAlpha; // 0-1
 
       void main() {
         // Values are in pixel units. Compute the pixel position of the scaled
@@ -65,7 +64,6 @@
     </script>
 
     <script id=frag type=x-shader>
-      #version 300 es
       precision lowp float;
       precision lowp int;
       precision lowp sampler2D;
@@ -73,14 +71,12 @@
       uniform sampler2D sampler;
       uniform vec2 atlasSize; // x, y (px)
 
-      in vec2 vTexCoord;
-      in float vMinusAlpha;
-
-      out vec4 frag;
+      varying vec2 vTexCoord;
+      varying float vMinusAlpha;
 
       void main() {
-        vec4 color = texture(sampler, vTexCoord / atlasSize);
-        frag = vec4(color.rgb, color.a - vMinusAlpha);
+        vec4 color = texture2D(sampler, vTexCoord / atlasSize);
+        gl_FragColor = vec4(color.rgb, color.a - vMinusAlpha);
       }
     </script>
 
@@ -145,7 +141,7 @@
       }
       const DIMENSIONS = 2 // "2D"
       const TILE_LENGTH = 3 // width / height (px)
-      const ATLAS_PNG_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAADCAMAAAB21NVEAAAACVBMVEUAAAAA/wAAAABJBy5MAAAAA3RSTlMA//9EUNYhAAAAGElEQVQImWNgZGRkYGRgYmJiYGSCs2BiAAHXACALOlztAAAAAElFTkSuQmCC'
+      const ATLAS_PNG_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAECAMAAACwak/eAAAACVBMVEUAAAAA/wAAAABJBy5MAAAAA3RSTlMA//9EUNYhAAAAHElEQVQImWNgZGRkYGRgYmJigAJGJnQBdBXoAAAFvgAgrtOQUAAAAABJRU5ErkJggg=='
       const TEX_COORD = { // px
         zero: {x: 0, y: 0},
         one: {x: 3, y: 0},
@@ -380,17 +376,33 @@
       }
 
       const canvas = window.document.querySelector('canvas')
-      const gl = canvas.getContext('webgl2', {
+      const gl = canvas.getContext('webgl', {
         alpha: false,
         depth: false,
         antialias: false,
-        preferLowPowerToHighPerformance: true,
 
         // Don't clear the screen. A full-screen black translucent texture is
         // drawn each render.
         preserveDrawingBuffer: true
       })
-      if (!gl) alert('WebGL 2 is unsupported by this browser :-[')
+
+      if (!gl) alert('WebGL is unsupported by this browser :-[')
+
+      const proto = WebGLRenderingContext.prototype
+      if (!proto.drawArraysInstanced || !proto.vertexAttribDivisor) {
+        const ext = gl.getExtension('ANGLE_instanced_arrays')
+        if (!ext) alert('WebGL extension ANGLE_instanced_arrays is unsupported by this browser :-[')
+
+        proto.drawArraysInstanced = ext.drawArraysInstancedANGLE.bind(ext)
+        proto.vertexAttribDivisor = ext.vertexAttribDivisorANGLE.bind(ext)
+      }
+
+      if (!proto.createVertexArray || !proto.bindVertexArray) {
+        const ext = gl.getExtension('OES_vertex_array_object')
+        if (!ext) alert('WebGL extension OES_vertex_array_object is unsupported by this browser :-[')
+        proto.createVertexArray = ext.createVertexArrayOES.bind(ext)
+        proto.bindVertexArray = ext.bindVertexArrayOES.bind(ext)
+      }
 
       const state = {requestId: undefined}
       state.instances = Array.from(Array(SPAWN.total)).map(spawn)
