@@ -302,6 +302,21 @@
       }
 
       function initGL(state, gl) {
+        const proto = WebGLRenderingContext.prototype
+        {
+          const ext = gl.getExtension('ANGLE_instanced_arrays')
+          if (!ext) alert('WebGL extension ANGLE_instanced_arrays is unsupported by this browser :-[')
+
+          proto.drawArraysInstanced = ext.drawArraysInstancedANGLE.bind(ext)
+          proto.vertexAttribDivisor = ext.vertexAttribDivisorANGLE.bind(ext)
+        }
+        {
+          const ext = gl.getExtension('OES_vertex_array_object')
+          if (!ext) alert('WebGL extension OES_vertex_array_object is unsupported by this browser :-[')
+          proto.createVertexArray = ext.createVertexArrayOES.bind(ext)
+          proto.bindVertexArray = ext.bindVertexArrayOES.bind(ext)
+        }
+
         gl.enable(gl.BLEND)
         gl.blendEquation(gl.FUNC_ADD)
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -387,22 +402,6 @@
       })
 
       if (!gl) alert('WebGL is unsupported by this browser :-[')
-
-      const proto = WebGLRenderingContext.prototype
-      if (!proto.drawArraysInstanced || !proto.vertexAttribDivisor) {
-        const ext = gl.getExtension('ANGLE_instanced_arrays')
-        if (!ext) alert('WebGL extension ANGLE_instanced_arrays is unsupported by this browser :-[')
-
-        proto.drawArraysInstanced = ext.drawArraysInstancedANGLE.bind(ext)
-        proto.vertexAttribDivisor = ext.vertexAttribDivisorANGLE.bind(ext)
-      }
-
-      if (!proto.createVertexArray || !proto.bindVertexArray) {
-        const ext = gl.getExtension('OES_vertex_array_object')
-        if (!ext) alert('WebGL extension OES_vertex_array_object is unsupported by this browser :-[')
-        proto.createVertexArray = ext.createVertexArrayOES.bind(ext)
-        proto.bindVertexArray = ext.bindVertexArrayOES.bind(ext)
-      }
 
       const state = {requestId: undefined}
       state.instances = Array.from(Array(SPAWN.total)).map(spawn)
