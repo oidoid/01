@@ -1,5 +1,5 @@
 # 01
-64 px<sup>2</sup> Matrix themed WebGL 2 shader.
+64 px<sup>2</sup> The Matrix themed WebGL shader.
 
 ![](01.gif)
 
