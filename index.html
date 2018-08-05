@@ -387,7 +387,9 @@
           })
         }
 
-        startLooping(state)
+        if (!document.hidden && !gl.isContextLost()) {
+          startLooping(state)
+        }
       }
 
       const canvas = window.document.querySelector('canvas')
