@@ -1,0 +1,18 @@
+body {
+  /* The background color can be shown during quick resizes and context
+     loss. */
+  background: #000;
+
+  /* Make the body flush with the window. */
+  margin: 0;
+}
+
+canvas {
+  /* Prevent additional line height spacing by changing display type from
+     inline to block. */
+  display: block;
+
+  /* When the user scales, use nearest-neighbor to prevent blurriness. */
+  image-rendering: optimizeSpeed;
+  image-rendering: pixelated;
+}
