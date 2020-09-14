@@ -1,7 +1,7 @@
 # 01
 64 px<sup>2</sup> The Matrix themed WebGL shader.
 
-![](01.gif)
+![Demonstration](demo.gif)
 
 [Click here for demo](https://htmlpreview.github.io/?https://github.com/niedzielski/01/blob/master/index.html)
 
