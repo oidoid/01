@@ -3,7 +3,7 @@
 
 ![Demonstration](demo.gif)
 
-[Click here for demo](https://htmlpreview.github.io/?https://github.com/niedzielski/01/blob/master/index.html)
+[Click here for demo](https://0one.netlify.app)
 
 ## See Also
 - PICO-8: https://twitter.com/2DArray/status/999483294944284674
