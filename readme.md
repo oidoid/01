@@ -2,9 +2,7 @@
 
 64 px<sup>2</sup> The Matrix themed WebGL shader.
 
-![Demonstration](demo.gif)
-
-[Click here for demo](https://0one.netlify.app)
+[![Demonstration](demo.gif)](https://oidoid.github.io/01)
 
 ## See Also
 
