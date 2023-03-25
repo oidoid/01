@@ -320,7 +320,7 @@ function onAtlasLoaded(state, gl) {
   const extension = gl.getExtension('WEBGL_lose_context')
   if (extension) {
     addEventListener('keyup', (event) => {
-      if (event.key != 'p') return
+      if (event.key !== 'p') return
       if (gl.isContextLost()) extension.restoreContext()
       else extension.loseContext()
     })
